@@ -1,25 +1,29 @@
-# Shopify App Template - React Router
+# AI Store Scanner
 
-This is a template for building a [Shopify app](https://shopify.dev/docs/apps/getting-started) using [React Router](https://reactrouter.com/). It was forked from the [Shopify Remix app template](https://github.com/Shopify/shopify-app-template-remix) and converted to React Router.
+A Shopify app, built on [React Router](https://reactrouter.com/), that scans a merchant's store and uses the [Anthropic API](https://docs.claude.com/) (Claude) to generate actionable improvement recommendations. Merchants can also request custom features from a scan, which are tracked through a build queue.
 
-Rather than cloning this repo, follow the [Quick Start steps](https://github.com/Shopify/shopify-app-template-react-router#quick-start).
+It was forked from the [Shopify Remix app template](https://github.com/Shopify/shopify-app-template-remix), converted to React Router, and extended with the scanning/recommendation functionality described below.
 
-Visit the [`shopify.dev` documentation](https://shopify.dev/docs/api/shopify-app-react-router) for more details on the React Router app package.
+## What it does
 
-## Upgrading from Remix
-
-If you have an existing Remix app that you want to upgrade to React Router, please follow the [upgrade guide](https://github.com/Shopify/shopify-app-template-react-router/wiki/Upgrading-from-Remix). Otherwise, please follow the quick start guide below.
+- **Store scan** ([app.\_index.tsx](app/routes/app._index.tsx)): Collects store data via the Admin GraphQL API and sends it to Claude to generate prioritized recommendations for the merchant.
+- **Settings** ([app.settings.tsx](app/routes/app.settings.tsx)): Merchants configure their own Anthropic API key, choose an AI model (see [ai-models.ts](app/models/ai-models.ts)), and set up a Slack webhook and/or admin notification email for alerts.
+- **Feature requests & build queue** ([app.build-queue.tsx](app/routes/app.build-queue.tsx)): Recommendations from a scan can be turned into feature requests, which are tracked with a status (requested, in progress, done, etc.) and trigger notifications ([notify.server.ts](app/models/notify.server.ts)).
+- **Session & data storage**: Shop settings, scans, and feature requests are persisted via [Prisma](https://www.prisma.io/) (see `prisma/schema.prisma`).
+- **Compliance webhooks**: Standard GDPR webhook handlers for customer data requests, customer redact, and shop redact are included.
 
 ## Quick start
 
 ### Prerequisites
 
-Before you begin, you'll need to [download and install the Shopify CLI](https://shopify.dev/docs/apps/tools/cli/getting-started) if you haven't already.
+- [Shopify CLI](https://shopify.dev/docs/apps/tools/cli/getting-started)
+- An [Anthropic API key](https://console.anthropic.com/) (merchants can also supply their own key per-shop in the app's Settings page; `ANTHROPIC_API_KEY` in the environment is used as a fallback)
 
 ### Setup
 
 ```shell
-shopify app init --template=https://github.com/Shopify/shopify-app-template-react-router
+npm install
+npm run setup
 ```
 
 ### Local Development
@@ -60,14 +64,7 @@ export async function loader({ request }) {
 }
 ```
 
-This template comes pre-configured with examples of:
-
-1. Setting up your Shopify app in [/app/shopify.server.ts](https://github.com/Shopify/shopify-app-template-react-router/blob/main/app/shopify.server.ts)
-2. Querying data using Graphql. Please see: [/app/routes/app.\_index.tsx](https://github.com/Shopify/shopify-app-template-react-router/blob/main/app/routes/app._index.tsx).
-3. Responding to webhooks. Please see [/app/routes/webhooks.tsx](https://github.com/Shopify/shopify-app-template-react-router/blob/main/app/routes/webhooks.app.uninstalled.tsx).
-4. Using metafields, metaobjects, and declarative custom data definitions. Please see [/app/routes/app.\_index.tsx](https://github.com/Shopify/shopify-app-template-react-router/blob/main/app/routes/app._index.tsx) and [shopify.app.toml](https://github.com/Shopify/shopify-app-template-react-router/blob/main/shopify.app.toml).
-
-Please read the [documentation for @shopify/shopify-app-react-router](https://shopify.dev/docs/api/shopify-app-react-router) to see what other API's are available.
+Shopify app setup lives in [app/shopify.server.ts](app/shopify.server.ts). Compliance webhook handlers live in [app/routes/webhooks.*.tsx](app/routes). See the [documentation for @shopify/shopify-app-react-router](https://shopify.dev/docs/api/shopify-app-react-router) for other available APIs.
 
 ## Shopify Dev MCP
 
