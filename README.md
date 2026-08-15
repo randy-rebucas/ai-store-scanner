@@ -116,6 +116,8 @@ pnpm run build
 
 ## Hosting
 
+This app is configured to deploy on [Vercel](https://vercel.com) — see [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) for the full setup and deploy steps.
+
 When you're ready to set up your app in production, you can follow [our deployment documentation](https://shopify.dev/docs/apps/launch/deployment) to host it externally. From there, you have a few options:
 
 - [Google Cloud Run](https://shopify.dev/docs/apps/launch/deployment/deploy-to-google-cloud-run): This tutorial is written specifically for this example repo, and is compatible with the extended steps included in the subsequent [**Build your app**](tutorial) in the **Getting started** docs. It is the most detailed tutorial for taking a React Router-based Shopify app and deploying it to production. It includes configuring permissions and secrets, setting up a production database, and even hosting your apps behind a load balancer across multiple regions.
