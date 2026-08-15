@@ -1,0 +1,13 @@
+.index {
+  min-height: 100%;
+  width: 100%;
+  padding: 4rem 1.5rem;
+  background:
+    radial-gradient(60rem 30rem at 15% -10%, rgba(0, 122, 92, 0.08), transparent),
+    #fafaf9;
+}
+
+.content {
+  max-width: 60rem;
+  margin: 0 auto;
+}
