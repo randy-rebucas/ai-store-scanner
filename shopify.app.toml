@@ -1,7 +1,7 @@
 # Learn more about configuring your app at https://shopify.dev/docs/apps/tools/cli/configuration
 
-client_id = "f668d3731e3910653e7247ff11f6dd94"
-application_url = "https://example.com"
+client_id = "fd3961af615f16cfb9d4e22854b9f7e9"
+application_url = "https://ai-store-scanner.vercel.app"
 embedded = true
 name = "AI Store Scanner"
 
@@ -26,7 +26,7 @@ api_version = "2026-10"
   shop_deletion_url = "/webhooks/shop/redact"
 
 [auth]
-redirect_urls = [ "https://example.com/api/auth" ]
+redirect_urls = [ "https://ai-store-scanner.vercel.app/auth/callback" ]
 
 [build]
 automatically_update_urls_on_dev = true
