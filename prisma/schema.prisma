@@ -40,8 +40,23 @@ model ShopSettings {
   aiModel                String   @default("claude-sonnet-5")
   slackWebhookUrl        String?
   adminNotificationEmail String?
+  weeklyDigestEnabled    Boolean  @default(true)
   createdAt              DateTime @default(now())
   updatedAt              DateTime @updatedAt
+}
+
+// Tracks whether a merchant marked a recommendation (identified by its exact
+// title, which the AI keeps stable/short by design) as implemented or
+// dismissed, so it isn't suggested again on future scans.
+model RecommendationStatus {
+  id        String   @id @default(cuid())
+  shop      String
+  title     String
+  status    String // implemented | dismissed
+  createdAt DateTime @default(now())
+
+  @@unique([shop, title])
+  @@index([shop])
 }
 
 model StoreScan {

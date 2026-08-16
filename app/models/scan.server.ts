@@ -330,6 +330,7 @@ export async function generateRecommendations(
   shop: string,
   storeData: StoreSnapshot,
   onProgress?: ScanProgress,
+  excludeTitles: string[] = [],
 ): Promise<Recommendation[]> {
   const apiKey = await getAnthropicApiKey(shop);
   if (!apiKey) {
@@ -345,6 +346,10 @@ export async function generateRecommendations(
 
   onProgress?.(`Asking Claude (${model}) to analyze your store...`);
 
+  const excludeNote = excludeTitles.length
+    ? `\n\nThe merchant has already implemented or dismissed these recommendations — do not suggest them again, find different opportunities instead: ${excludeTitles.join(", ")}`
+    : "";
+
   let message;
   try {
     message = await client.messages.create({
@@ -354,7 +359,7 @@ export async function generateRecommendations(
       messages: [
         {
           role: "user",
-          content: `Store snapshot:\n${JSON.stringify(storeData, null, 2)}`,
+          content: `Store snapshot:\n${JSON.stringify(storeData, null, 2)}${excludeNote}`,
         },
       ],
     });

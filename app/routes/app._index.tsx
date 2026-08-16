@@ -22,6 +22,13 @@ import {
   getRequestedTitles,
 } from "../models/featureRequest.server";
 import { notifyFeatureRequested } from "../models/notify.server";
+import {
+  getRecommendationStatuses,
+  setRecommendationStatus,
+  clearRecommendationStatus,
+  type RecommendationStatusValue,
+} from "../models/recommendationStatus.server";
+import { getCohortBenchmark } from "../models/benchmark.server";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
@@ -38,17 +45,23 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     latestScan?.storeData ? JSON.parse(latestScan.storeData) : null;
 
   let trends: ReturnType<typeof computeScanTrends> = [];
+  let benchmarks: Awaited<ReturnType<typeof getCohortBenchmark>> = [];
   if (latestScan && latestScan.status === "completed" && currentStoreData) {
     const previousScan = await getPreviousCompletedScan(session.shop, latestScan.id);
     const previousStoreData: StoreSnapshot | null =
       previousScan?.storeData ? JSON.parse(previousScan.storeData) : null;
     trends = computeScanTrends(currentStoreData, previousStoreData);
+    benchmarks = await getCohortBenchmark(session.shop, currentStoreData);
   }
+
+  const recommendationStatuses = await getRecommendationStatuses(session.shop);
 
   return {
     hasApiKey: Boolean(settings?.anthropicApiKey || process.env.ANTHROPIC_API_KEY),
     requestedTitles,
     trends,
+    benchmarks,
+    recommendationStatuses,
     scan: latestScan
       ? {
           id: latestScan.id,
@@ -96,6 +109,29 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     });
 
     return { ok: true, requested: title };
+  }
+
+  if (intent === "mark-recommendation") {
+    const title = String(formData.get("title") || "");
+    const status = String(formData.get("status") || "");
+
+    if (!title) {
+      return { ok: false, error: "Missing recommendation title" };
+    }
+
+    if (status === "active") {
+      await clearRecommendationStatus(session.shop, title);
+    } else if (status === "implemented" || status === "dismissed") {
+      await setRecommendationStatus(
+        session.shop,
+        title,
+        status as RecommendationStatusValue,
+      );
+    } else {
+      return { ok: false, error: "Unknown status" };
+    }
+
+    return { ok: true, title, status };
   }
 
   return { ok: false, error: "Unknown action" };
@@ -162,6 +198,73 @@ function FeatureRequestButton({
   );
 }
 
+function RecommendationStatusControls({
+  title,
+  status,
+}: {
+  title: string;
+  status: RecommendationStatusValue | undefined;
+}) {
+  const fetcher = useFetcher<typeof action>();
+  const shopify = useAppBridge();
+  const isSaving = fetcher.state !== "idle";
+
+  useEffect(() => {
+    if (fetcher.data?.ok && fetcher.state === "idle" && "status" in fetcher.data) {
+      const label =
+        fetcher.data.status === "implemented"
+          ? "Marked as implemented"
+          : fetcher.data.status === "dismissed"
+            ? "Dismissed"
+            : "Restored to active";
+      shopify.toast.show(label);
+    }
+  }, [fetcher.data, fetcher.state, shopify]);
+
+  const mark = (nextStatus: "implemented" | "dismissed" | "active") => {
+    fetcher.submit(
+      { intent: "mark-recommendation", title, status: nextStatus },
+      { method: "POST" },
+    );
+  };
+
+  if (status === "implemented" || status === "dismissed") {
+    return (
+      <s-stack direction="inline" gap="small">
+        <s-badge tone={status === "implemented" ? "success" : "neutral"}>
+          {status === "implemented" ? "Implemented" : "Dismissed"}
+        </s-badge>
+        <s-button
+          variant="tertiary"
+          onClick={() => mark("active")}
+          {...(isSaving ? { loading: true } : {})}
+        >
+          Move back to active
+        </s-button>
+      </s-stack>
+    );
+  }
+
+  return (
+    <s-stack direction="inline" gap="small">
+      <s-button
+        variant="tertiary"
+        onClick={() => mark("implemented")}
+        {...(isSaving ? { loading: true } : {})}
+      >
+        Mark as implemented
+      </s-button>
+      <s-button
+        variant="tertiary"
+        onClick={() => mark("dismissed")}
+        {...(isSaving ? { loading: true } : {})}
+      >
+        Dismiss
+      </s-button>
+    </s-stack>
+  );
+}
+
 const AI_SHOPIFY_BUILDER_URL = "https://www.ai-shopify-builder.app";
 
 function BuildPromptPanel({ buildPrompt }: { buildPrompt: string }) {
@@ -215,7 +318,9 @@ function BuildPromptPanel({ buildPrompt }: { buildPrompt: string }) {
 }
 
 export default function Index() {
-  const { hasApiKey, scan, requestedTitles, trends } = useLoaderData<typeof loader>();
+  const { hasApiKey, scan, requestedTitles, trends, benchmarks, recommendationStatuses } =
+    useLoaderData<typeof loader>();
+  const [showHandled, setShowHandled] = useState(false);
   const shopify = useAppBridge();
   const revalidator = useRevalidator();
 
@@ -355,6 +460,25 @@ export default function Index() {
         </s-section>
       )}
 
+      {benchmarks.length > 0 && (
+        <s-section heading="How you compare">
+          <s-paragraph>
+            Compared to {benchmarks[0].cohortSize} other stores of a similar
+            size using AI Store Scanner:
+          </s-paragraph>
+          <s-stack direction="inline" gap="base">
+            {benchmarks.map((b) => {
+              const better = b.storeValue <= b.cohortAverage;
+              return (
+                <s-badge key={b.key} tone={better ? "success" : "warning"}>
+                  {b.label}: {b.storeValue}% (avg {b.cohortAverage}%)
+                </s-badge>
+              );
+            })}
+          </s-stack>
+        </s-section>
+      )}
+
       {scan?.storeData && (
         <s-section heading="Store snapshot">
           <s-stack direction="inline" gap="large">
@@ -389,39 +513,89 @@ export default function Index() {
         </s-banner>
       )}
 
-      {scan?.recommendations && scan.recommendations.length > 0 && (
-        <s-section heading="Recommended features">
-          <s-stack direction="block" gap="base">
-            {scan.recommendations.map((rec, index) => (
-              <s-box
-                key={rec.title}
-                padding="base"
-                borderWidth="base"
-                borderRadius="base"
-                background="subdued"
-              >
-                <s-stack direction="block" gap="small">
-                  <s-heading>
-                    {index + 1}. {rec.title}
-                  </s-heading>
-                  <s-paragraph>{rec.description}</s-paragraph>
-                  <s-badge tone={IMPACT_TONE[rec.impact] || "info"}>
-                    {rec.impactLabel}
-                  </s-badge>
-                  <s-box>
-                    <FeatureRequestButton
-                      scanId={scan.id}
-                      recommendation={rec}
-                      alreadyRequested={requestedTitles.includes(rec.title)}
-                    />
-                  </s-box>
-                  <BuildPromptPanel buildPrompt={rec.buildPrompt} />
+      {scan?.recommendations && scan.recommendations.length > 0 && (() => {
+        const activeRecs = scan.recommendations.filter(
+          (rec) => !recommendationStatuses[rec.title],
+        );
+        const handledRecs = scan.recommendations.filter(
+          (rec) => recommendationStatuses[rec.title],
+        );
+
+        return (
+          <>
+            {activeRecs.length > 0 && (
+              <s-section heading="Recommended features">
+                <s-stack direction="block" gap="base">
+                  {activeRecs.map((rec, index) => (
+                    <s-box
+                      key={rec.title}
+                      padding="base"
+                      borderWidth="base"
+                      borderRadius="base"
+                      background="subdued"
+                    >
+                      <s-stack direction="block" gap="small">
+                        <s-heading>
+                          {index + 1}. {rec.title}
+                        </s-heading>
+                        <s-paragraph>{rec.description}</s-paragraph>
+                        <s-badge tone={IMPACT_TONE[rec.impact] || "info"}>
+                          {rec.impactLabel}
+                        </s-badge>
+                        <s-stack direction="inline" gap="small">
+                          <FeatureRequestButton
+                            scanId={scan.id}
+                            recommendation={rec}
+                            alreadyRequested={requestedTitles.includes(rec.title)}
+                          />
+                          <RecommendationStatusControls
+                            title={rec.title}
+                            status={recommendationStatuses[rec.title]}
+                          />
+                        </s-stack>
+                        <BuildPromptPanel buildPrompt={rec.buildPrompt} />
+                      </s-stack>
+                    </s-box>
+                  ))}
                 </s-stack>
-              </s-box>
-            ))}
-          </s-stack>
-        </s-section>
-      )}
+              </s-section>
+            )}
+
+            {handledRecs.length > 0 && (
+              <s-section heading="Handled recommendations">
+                <s-button variant="tertiary" onClick={() => setShowHandled((v) => !v)}>
+                  {showHandled
+                    ? "Hide"
+                    : `Show ${handledRecs.length} handled recommendation${handledRecs.length === 1 ? "" : "s"}`}
+                </s-button>
+
+                {showHandled && (
+                  <s-stack direction="block" gap="base">
+                    {handledRecs.map((rec) => (
+                      <s-box
+                        key={rec.title}
+                        padding="base"
+                        borderWidth="base"
+                        borderRadius="base"
+                        background="subdued"
+                      >
+                        <s-stack direction="block" gap="small">
+                          <s-heading>{rec.title}</s-heading>
+                          <s-paragraph>{rec.description}</s-paragraph>
+                          <RecommendationStatusControls
+                            title={rec.title}
+                            status={recommendationStatuses[rec.title]}
+                          />
+                        </s-stack>
+                      </s-box>
+                    ))}
+                  </s-stack>
+                )}
+              </s-section>
+            )}
+          </>
+        );
+      })()}
 
       <s-section slot="aside" heading="How it works">
         <s-unordered-list>

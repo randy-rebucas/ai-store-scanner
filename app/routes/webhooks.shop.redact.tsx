@@ -4,6 +4,7 @@ import db from "../db.server";
 import { deleteShopSettings } from "../models/settings.server";
 import { deleteShopScans } from "../models/scan.server";
 import { deleteShopFeatureRequests } from "../models/featureRequest.server";
+import { deleteShopRecommendationStatuses } from "../models/recommendationStatus.server";
 
 // Mandatory GDPR webhook, sent ~48h after uninstall. Erase everything this
 // app stored for the shop. Uninstall already does this immediately; this is
@@ -18,6 +19,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     deleteShopSettings(shop),
     deleteShopScans(shop),
     deleteShopFeatureRequests(shop),
+    deleteShopRecommendationStatuses(shop),
   ]);
 
   return new Response();

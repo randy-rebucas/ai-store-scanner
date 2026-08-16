@@ -22,6 +22,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       : null,
     slackWebhookUrl: settings?.slackWebhookUrl || "",
     adminNotificationEmail: settings?.adminNotificationEmail || "",
+    weeklyDigestEnabled: settings?.weeklyDigestEnabled ?? true,
     defaultAdminNotificationEmail:
       process.env.ADMIN_NOTIFICATION_EMAIL || "admin@localpro.asia",
   };
@@ -41,12 +42,14 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const aiModel = formData.get("aiModel");
   const slackWebhookUrl = formData.get("slackWebhookUrl");
   const adminNotificationEmail = formData.get("adminNotificationEmail");
+  const weeklyDigestEnabled = formData.get("weeklyDigestEnabled") === "true";
 
   const data: {
     anthropicApiKey?: string;
     aiModel?: string;
     slackWebhookUrl?: string | null;
     adminNotificationEmail?: string | null;
+    weeklyDigestEnabled?: boolean;
   } = {
     aiModel: typeof aiModel === "string" && aiModel ? aiModel : undefined,
     slackWebhookUrl:
@@ -58,6 +61,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       adminNotificationEmail.trim()
         ? adminNotificationEmail.trim()
         : null,
+    weeklyDigestEnabled,
   };
 
   if (typeof apiKey === "string" && apiKey.trim().length > 0) {
@@ -78,6 +82,7 @@ export default function Settings() {
     maskedApiKey,
     slackWebhookUrl,
     adminNotificationEmail,
+    weeklyDigestEnabled,
     defaultAdminNotificationEmail,
   } = useLoaderData<typeof loader>();
   const fetcher = useFetcher<typeof action>();
@@ -88,6 +93,7 @@ export default function Settings() {
   const [adminEmailInput, setAdminEmailInput] = useState(
     adminNotificationEmail,
   );
+  const [digestEnabled, setDigestEnabled] = useState(weeklyDigestEnabled);
 
   const isSaving = fetcher.state !== "idle";
 
@@ -107,6 +113,7 @@ export default function Settings() {
         aiModel: selectedModel,
         slackWebhookUrl: slackWebhookInput,
         adminNotificationEmail: adminEmailInput,
+        weeklyDigestEnabled: String(digestEnabled),
       },
       { method: "POST" },
     );
@@ -197,6 +204,22 @@ export default function Settings() {
             }
           />
         </s-stack>
+      </s-section>
+
+      <s-section heading="Weekly digest">
+        <s-paragraph>
+          When enabled, we run a scan automatically once a week and email you
+          a summary of what changed and the top new recommendations &mdash;
+          no need to open the app.
+        </s-paragraph>
+        <s-switch
+          name="weeklyDigestEnabled"
+          label="Enable weekly digest"
+          checked={digestEnabled}
+          onChange={(event: Event) =>
+            setDigestEnabled((event.target as HTMLInputElement).checked)
+          }
+        />
       </s-section>
 
       <s-section>

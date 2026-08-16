@@ -10,6 +10,7 @@ import {
   pruneOldScans,
 } from "../models/scan.server";
 import { getActivePlan, scanLimitForPlan } from "../models/billing.server";
+import { getHandledTitles } from "../models/recommendationStatus.server";
 
 // Streams newline-delimited JSON progress events for a single scan run, then
 // a final {type:"done"} event, all within one request/response cycle.
@@ -45,10 +46,12 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         const storeData = await collectStoreData(admin, (message) =>
           send({ type: "log", message }),
         );
+        const excludeTitles = await getHandledTitles(session.shop);
         const recommendations = await generateRecommendations(
           session.shop,
           storeData,
           (message) => send({ type: "log", message }),
+          excludeTitles,
         );
         send({ type: "log", message: "Saving scan results..." });
         await completeScan(scan.id, storeData, recommendations);

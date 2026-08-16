@@ -20,6 +20,7 @@ export async function upsertShopSettings(
     aiModel?: string;
     slackWebhookUrl?: string | null;
     adminNotificationEmail?: string | null;
+    weeklyDigestEnabled?: boolean;
   },
 ) {
   const stored = {

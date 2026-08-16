@@ -21,7 +21,20 @@ export default function Privacy() {
         request on your behalf and is never shared with any other shop. When you request a
         feature, a notification email (and optional Slack message) is sent so the app
         builder can follow up. Your subscription plan is used to determine your monthly
-        scan allowance.
+        scan allowance. If you enable the weekly digest, we run a scan on your behalf on
+        a recurring schedule and email you a summary.
+      </p>
+
+      <h2>Benchmarking</h2>
+      <p>
+        To show how your store compares to similar stores (e.g. &quot;your out-of-stock
+        rate vs. stores of a similar size&quot;), we compute anonymized aggregate averages
+        (like out-of-stock rate or repeat customer rate) across other shops using the app
+        that fall in the same store-size bucket as yours. This comparison only uses
+        aggregate counts already covered above &mdash; no shop names, individual records,
+        or identifying information are included or shown to other shops, and a comparison
+        is only shown when enough shops exist in a bucket to keep any single store from
+        being identifiable.
       </p>
 
       <h2>Third parties</h2>

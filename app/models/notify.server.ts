@@ -107,6 +107,75 @@ async function sendEmailNotification(
   }
 }
 
+type WeeklyDigestNotification = {
+  shop: string;
+  storeOwnerEmail: string | null;
+  trends: Array<{ label: string; delta: number; higherIsBetter: boolean }>;
+  topRecommendations: Array<{ title: string; description: string }>;
+  appUrl: string;
+};
+
+export async function notifyWeeklyDigest(notification: WeeklyDigestNotification) {
+  const settings = await getShopSettings(notification.shop);
+  if (settings && settings.weeklyDigestEnabled === false) {
+    return;
+  }
+
+  const to =
+    settings?.adminNotificationEmail ||
+    notification.storeOwnerEmail ||
+    DEFAULT_ADMIN_NOTIFICATION_EMAIL;
+
+  const transport = getSmtpTransport();
+  if (!transport) {
+    console.warn(
+      "SMTP_HOST/SMTP_PORT/SMTP_USER/SMTP_PASS not fully set; skipping weekly digest email",
+    );
+    return;
+  }
+
+  const fromEmail =
+    notification.storeOwnerEmail ||
+    process.env.NOTIFICATION_FROM_EMAIL ||
+    process.env.SMTP_USER;
+
+  const trendsHtml = notification.trends.length
+    ? `<ul>${notification.trends
+        .map((t) => {
+          const improved = t.higherIsBetter ? t.delta > 0 : t.delta < 0;
+          const arrow = t.delta > 0 ? "▲" : "▼";
+          return `<li style="color:${improved ? "#108043" : "#d82c0d"}">${arrow} ${escapeHtml(t.label)}: ${t.delta > 0 ? "+" : ""}${t.delta}</li>`;
+        })
+        .join("")}</ul>`
+    : "<p>No change since your last scan.</p>";
+
+  const recsHtml = notification.topRecommendations.length
+    ? `<ol>${notification.topRecommendations
+        .map(
+          (r) =>
+            `<li><strong>${escapeHtml(r.title)}</strong><br/>${escapeHtml(r.description)}</li>`,
+        )
+        .join("")}</ol>`
+    : "<p>No new recommendations this week.</p>";
+
+  try {
+    await transport.sendMail({
+      from: `"AI Store Scanner" <${fromEmail}>`,
+      to,
+      subject: `Weekly store scan: ${notification.shop}`,
+      html: `<p>Here's what changed on <strong>${escapeHtml(notification.shop)}</strong> this week.</p>
+<h3>Since your last scan</h3>
+${trendsHtml}
+<h3>Top recommendations</h3>
+${recsHtml}
+<p><a href="${escapeHtml(notification.appUrl)}">Open AI Store Scanner</a> to see the full scan and copy build prompts.</p>
+<p style="color:#6b7177;font-size:12px;">You're receiving this because weekly digests are enabled in Settings. You can turn them off there.</p>`,
+    });
+  } catch (error) {
+    console.error("Failed to send weekly digest email", error);
+  }
+}
+
 function escapeHtml(value: string): string {
   return value
     .replace(/&/g, "&amp;")
