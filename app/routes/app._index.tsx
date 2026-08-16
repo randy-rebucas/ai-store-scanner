@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import type { CSSProperties } from "react";
 import type {
   ActionFunctionArgs,
   HeadersFunction,
@@ -29,6 +30,11 @@ import {
   type RecommendationStatusValue,
 } from "../models/recommendationStatus.server";
 import { getCohortBenchmark } from "../models/benchmark.server";
+import { computeCategoryScores, computeOverallScore } from "../models/scoring.server";
+import {
+  recordPromptInteraction,
+  type PromptInteractionAction,
+} from "../models/promptInteraction.server";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
@@ -56,12 +62,17 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
   const recommendationStatuses = await getRecommendationStatuses(session.shop);
 
+  const categoryScores = currentStoreData ? computeCategoryScores(currentStoreData) : [];
+  const overallScore = computeOverallScore(categoryScores);
+
   return {
     hasApiKey: Boolean(settings?.anthropicApiKey || process.env.ANTHROPIC_API_KEY),
     requestedTitles,
     trends,
     benchmarks,
     recommendationStatuses,
+    categoryScores,
+    overallScore,
     scan: latestScan
       ? {
           id: latestScan.id,
@@ -132,6 +143,26 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     }
 
     return { ok: true, title, status };
+  }
+
+  if (intent === "track-prompt-interaction") {
+    const title = String(formData.get("title") || "");
+    const promptAction = String(formData.get("promptAction") || "");
+
+    if (
+      title &&
+      (promptAction === "viewed" ||
+        promptAction === "copied" ||
+        promptAction === "opened_builder")
+    ) {
+      await recordPromptInteraction(
+        session.shop,
+        title,
+        promptAction as PromptInteractionAction,
+      );
+    }
+
+    return { ok: true };
   }
 
   return { ok: false, error: "Unknown action" };
@@ -267,16 +298,38 @@ function RecommendationStatusControls({
 
 const AI_SHOPIFY_BUILDER_URL = "https://www.ai-shopify-builder.app";
 
-function BuildPromptPanel({ buildPrompt }: { buildPrompt: string }) {
+function BuildPromptPanel({
+  title,
+  buildPrompt,
+}: {
+  title: string;
+  buildPrompt: string;
+}) {
   const shopify = useAppBridge();
+  const trackFetcher = useFetcher();
   const [expanded, setExpanded] = useState(false);
 
   if (!buildPrompt) return null;
+
+  const track = (promptAction: "viewed" | "copied" | "opened_builder") => {
+    trackFetcher.submit(
+      { intent: "track-prompt-interaction", title, promptAction },
+      { method: "POST" },
+    );
+  };
+
+  const toggleExpanded = () => {
+    setExpanded((v) => {
+      if (!v) track("viewed");
+      return !v;
+    });
+  };
 
   const copyPrompt = async () => {
     try {
       await navigator.clipboard.writeText(buildPrompt);
       shopify.toast.show("Build prompt copied");
+      track("copied");
     } catch {
       shopify.toast.show("Couldn't copy prompt", { isError: true });
     }
@@ -285,7 +338,7 @@ function BuildPromptPanel({ buildPrompt }: { buildPrompt: string }) {
   return (
     <s-stack direction="block" gap="small-200">
       <s-stack direction="inline" gap="small">
-        <s-button variant="tertiary" onClick={() => setExpanded((v) => !v)}>
+        <s-button variant="tertiary" onClick={toggleExpanded}>
           {expanded ? "Hide build prompt" : "Show build prompt"}
         </s-button>
         <s-button variant="tertiary" onClick={copyPrompt}>
@@ -295,6 +348,7 @@ function BuildPromptPanel({ buildPrompt }: { buildPrompt: string }) {
           variant="tertiary"
           href={AI_SHOPIFY_BUILDER_URL}
           target="_blank"
+          onClick={() => track("opened_builder")}
         >
           Build it with AI Shopify Builder →
         </s-button>
@@ -317,9 +371,146 @@ function BuildPromptPanel({ buildPrompt }: { buildPrompt: string }) {
   );
 }
 
+function scoreColor(score: number): string {
+  if (score >= 80) return "#108043";
+  if (score >= 50) return "#b98900";
+  return "#d82c0d";
+}
+
+function OverallScoreRing({ score }: { score: number | null }) {
+  if (score === null) {
+    return (
+      <s-box
+        padding="base"
+        borderWidth="base"
+        borderRadius="base"
+        background="subdued"
+      >
+        <s-stack direction="block" gap="small-200">
+          <s-heading>Overall score</s-heading>
+          <s-text tone="neutral">Not enough data yet to score this store.</s-text>
+        </s-stack>
+      </s-box>
+    );
+  }
+
+  const color = scoreColor(score);
+  const ringStyle: CSSProperties = {
+    width: "112px",
+    height: "112px",
+    borderRadius: "50%",
+    background: `conic-gradient(${color} ${score * 3.6}deg, #e1e3e5 0deg)`,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    flexShrink: 0,
+  };
+  const innerStyle: CSSProperties = {
+    width: "88px",
+    height: "88px",
+    borderRadius: "50%",
+    background: "var(--p-color-bg-surface, #fff)",
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    justifyContent: "center",
+  };
+
+  const verdict =
+    score >= 80 ? "Great job!" : score >= 50 ? "Good progress" : "Needs attention";
+
+  return (
+    <s-box padding="base" borderWidth="base" borderRadius="base" background="subdued">
+      <s-stack direction="inline" gap="base">
+        <div style={ringStyle}>
+          <div style={innerStyle}>
+            <span style={{ fontSize: "28px", fontWeight: 700, lineHeight: 1 }}>
+              {score}
+            </span>
+            <span style={{ fontSize: "11px", color: "#6b7177" }}>/100</span>
+          </div>
+        </div>
+        <s-stack direction="block" gap="small-200">
+          <s-heading>Overall score</s-heading>
+          <s-text>{verdict}</s-text>
+          <s-text tone="neutral">
+            Based on real store data across the categories below.
+          </s-text>
+        </s-stack>
+      </s-stack>
+    </s-box>
+  );
+}
+
+function AnalysisOverview({
+  overallScore,
+  categoryScores,
+}: {
+  overallScore: number | null;
+  categoryScores: Array<{
+    key: string;
+    label: string;
+    score: number | null;
+    summary: string;
+    insufficientDataReason?: string;
+  }>;
+}) {
+  return (
+    <s-section heading="Analysis overview">
+      <s-paragraph>
+        Here&apos;s how your store is performing, based on the products,
+        orders, and customers collected in this scan.
+      </s-paragraph>
+      <s-stack direction="block" gap="base">
+        <OverallScoreRing score={overallScore} />
+        <s-stack direction="inline" gap="base">
+          {categoryScores.map((cat) => (
+            <s-box
+              key={cat.key}
+              padding="base"
+              borderWidth="base"
+              borderRadius="base"
+              background="subdued"
+            >
+              <s-stack direction="block" gap="small-200">
+                <s-text>{cat.label}</s-text>
+                {cat.score === null ? (
+                  <s-text tone="neutral">Not enough data</s-text>
+                ) : (
+                  <span
+                    style={{
+                      fontSize: "22px",
+                      fontWeight: 700,
+                      color: scoreColor(cat.score),
+                    }}
+                  >
+                    {cat.score}
+                    <span style={{ fontSize: "12px", color: "#6b7177" }}>/100</span>
+                  </span>
+                )}
+                <s-text tone="neutral">
+                  {cat.insufficientDataReason || cat.summary}
+                </s-text>
+              </s-stack>
+            </s-box>
+          ))}
+        </s-stack>
+      </s-stack>
+    </s-section>
+  );
+}
+
 export default function Index() {
-  const { hasApiKey, scan, requestedTitles, trends, benchmarks, recommendationStatuses } =
-    useLoaderData<typeof loader>();
+  const {
+    hasApiKey,
+    scan,
+    requestedTitles,
+    trends,
+    benchmarks,
+    recommendationStatuses,
+    categoryScores,
+    overallScore,
+  } = useLoaderData<typeof loader>();
   const [showHandled, setShowHandled] = useState(false);
   const shopify = useAppBridge();
   const revalidator = useRevalidator();
@@ -442,6 +633,10 @@ export default function Index() {
         </s-section>
       )}
 
+      {scan?.status === "completed" && categoryScores.length > 0 && (
+        <AnalysisOverview overallScore={overallScore} categoryScores={categoryScores} />
+      )}
+
       {trends.length > 0 && (
         <s-section heading="Since your last scan">
           <s-stack direction="inline" gap="base">
@@ -553,7 +748,7 @@ export default function Index() {
                             status={recommendationStatuses[rec.title]}
                           />
                         </s-stack>
-                        <BuildPromptPanel buildPrompt={rec.buildPrompt} />
+                        <BuildPromptPanel title={rec.title} buildPrompt={rec.buildPrompt} />
                       </s-stack>
                     </s-box>
                   ))}

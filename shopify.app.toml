@@ -7,7 +7,7 @@ name = "AI Store Scanner"
 
 [access_scopes]
 # Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
-scopes = "read_products, read_orders, read_customers, read_themes, read_discounts, read_content"
+scopes = "read_products, read_orders, read_customers, read_themes, read_discounts, read_content, read_legal_policies"
 
 [webhooks]
 api_version = "2026-10"

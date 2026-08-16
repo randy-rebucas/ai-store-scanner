@@ -12,6 +12,7 @@ export default function Privacy() {
         <li>Feature requests you submit from a scan (title, description, impact label, status).</li>
         <li>Optional Slack webhook URL and notification email override you configure in Settings.</li>
         <li>Your subscription plan and billing status, provided to us by Shopify via the Billing API. We never see or store your payment card details &mdash; all billing is handled directly by Shopify.</li>
+        <li>Whether you view, copy, or open an AI build prompt from a recommendation (no prompt content is stored, just that the action happened) &mdash; used only in aggregate to understand which parts of the app are useful.</li>
       </ul>
 
       <h2>How we use it</h2>

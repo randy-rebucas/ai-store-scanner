@@ -5,6 +5,7 @@ import { deleteShopSettings } from "../models/settings.server";
 import { deleteShopScans } from "../models/scan.server";
 import { deleteShopFeatureRequests } from "../models/featureRequest.server";
 import { deleteShopRecommendationStatuses } from "../models/recommendationStatus.server";
+import { deleteShopPromptInteractions } from "../models/promptInteraction.server";
 
 export const action = async ({ request }: ActionFunctionArgs) => {
   const { shop, session, topic } = await authenticate.webhook(request);
@@ -20,6 +21,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       deleteShopScans(shop),
       deleteShopFeatureRequests(shop),
       deleteShopRecommendationStatuses(shop),
+      deleteShopPromptInteractions(shop),
     ]);
   }
 

@@ -85,3 +85,17 @@ model FeatureRequest {
   @@unique([shop, scanId, title])
   @@index([shop, createdAt])
 }
+
+// Lightweight usage instrumentation for the AI build-prompt feature, so we
+// can tell whether merchants actually view/copy/act on generated prompts
+// rather than flying blind on adoption.
+model PromptInteraction {
+  id        String   @id @default(cuid())
+  shop      String
+  title     String
+  action    String // viewed | copied | opened_builder
+  createdAt DateTime @default(now())
+
+  @@index([shop, createdAt])
+  @@index([action])
+}

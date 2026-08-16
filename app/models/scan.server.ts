@@ -35,6 +35,9 @@ export type StoreSnapshot = {
     untaggedCount: number;
     withoutImagesCount: number;
     sampleTags: string[];
+    missingSeoTitleCount: number;
+    missingSeoDescriptionCount: number;
+    sampleSize: number;
   };
   collections: {
     sampleTitles: string[];
@@ -57,6 +60,13 @@ export type StoreSnapshot = {
   };
   metafields: {
     productsWithMetafieldsSample: number;
+  };
+  trust: {
+    // Which of Shopify's standard storefront policy pages are configured.
+    configuredPolicyTypes: string[];
+    // False if the shop hasn't (yet) granted `read_legal_policies` — lets
+    // the scorer show "not available" instead of falsely scoring 0.
+    policiesAccessible: boolean;
   };
   unavailable: string[];
 };
@@ -100,6 +110,10 @@ const COUNTS_QUERY = `#graphql
             minVariantPrice { amount }
             maxVariantPrice { amount }
           }
+          seo {
+            title
+            description
+          }
         }
       }
     }
@@ -133,6 +147,48 @@ const COUNTS_QUERY = `#graphql
   }
 `;
 
+// Queried separately from COUNTS_QUERY: `read_legal_policies` is a newer
+// scope, so shops that installed before it was added won't have granted it
+// until they reauthorize. GraphQL nulls the whole response when any field in
+// a query is access-denied, so isolating this avoids taking the entire scan
+// down for shops that haven't upgraded yet — it just degrades this one signal.
+const SHOP_POLICIES_QUERY = `#graphql
+  query ShopPolicies {
+    shop {
+      shopPolicies {
+        type
+        body
+      }
+    }
+  }
+`;
+
+async function fetchConfiguredPolicyTypes(
+  admin: AdminApiContext,
+): Promise<{ configuredPolicyTypes: string[]; policiesAccessible: boolean }> {
+  try {
+    const response = await admin.graphql(SHOP_POLICIES_QUERY);
+    const json: {
+      data?: { shop?: { shopPolicies?: Array<{ type: string; body: string }> } };
+      errors?: unknown;
+    } = await response.json();
+    if (json.errors) {
+      return { configuredPolicyTypes: [], policiesAccessible: false };
+    }
+
+    const policies: Array<{ type: string; body: string }> =
+      json.data?.shop?.shopPolicies ?? [];
+    return {
+      configuredPolicyTypes: policies
+        .filter((p) => p.body?.trim().length > 0)
+        .map((p) => p.type),
+      policiesAccessible: true,
+    };
+  } catch {
+    return { configuredPolicyTypes: [], policiesAccessible: false };
+  }
+}
+
 export type ScanProgress = (message: string) => void;
 
 export async function collectStoreData(
@@ -145,6 +201,8 @@ export async function collectStoreData(
   const response = await admin.graphql(COUNTS_QUERY);
   const json = await response.json();
   const data = json.data;
+  const { configuredPolicyTypes, policiesAccessible } =
+    await fetchConfiguredPolicyTypes(admin);
   onProgress?.("Store data collected. Crunching the numbers...");
 
   const productEdges: Array<{
@@ -158,6 +216,7 @@ export async function collectStoreData(
         minVariantPrice: { amount: string };
         maxVariantPrice: { amount: string };
       };
+      seo: { title: string | null; description: string | null } | null;
     };
   }> = data.products?.edges ?? [];
 
@@ -242,6 +301,13 @@ export async function collectStoreData(
       sampleTags: Array.from(
         new Set(productEdges.flatMap((e) => e.node.tags)),
       ).slice(0, 20),
+      missingSeoTitleCount: productEdges.filter(
+        (e) => !e.node.seo?.title?.trim(),
+      ).length,
+      missingSeoDescriptionCount: productEdges.filter(
+        (e) => !e.node.seo?.description?.trim(),
+      ).length,
+      sampleSize: productEdges.length,
     },
     collections: {
       sampleTitles: collectionEdges.map((e) => e.node.title),
@@ -272,6 +338,10 @@ export async function collectStoreData(
       productsWithMetafieldsSample: productEdges.filter(
         (e) => e.node.metafields.edges.length > 0,
       ).length,
+    },
+    trust: {
+      configuredPolicyTypes,
+      policiesAccessible,
     },
     unavailable: [
       "Installed apps (not exposed by the Admin API to other apps)",
