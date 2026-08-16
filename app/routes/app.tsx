@@ -1,19 +1,19 @@
 import type { HeadersFunction, LoaderFunctionArgs } from "react-router";
-import { Outlet, redirect, useLoaderData, useRouteError } from "react-router";
+import { Outlet, useLoaderData, useRouteError } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { AppProvider } from "@shopify/shopify-app-react-router/react";
 
 import { authenticate } from "../shopify.server";
-import { getActivePlan } from "../models/billing.server";
+import { BILLING_ENFORCED, getActivePlan } from "../models/billing.server";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  const { billing } = await authenticate.admin(request);
+  const { billing, redirect } = await authenticate.admin(request);
 
   const url = new URL(request.url);
-  if (url.pathname !== "/app/plans") {
+  if (BILLING_ENFORCED && url.pathname !== "/app/plans") {
     const activePlan = await getActivePlan(billing);
     if (!activePlan) {
-      throw redirect("/app/plans");
+      return redirect("/app/plans");
     }
   }
 

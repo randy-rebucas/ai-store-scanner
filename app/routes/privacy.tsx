@@ -11,6 +11,7 @@ export default function Privacy() {
         <li>The Anthropic API key and AI model you configure in Settings (stored encrypted).</li>
         <li>Feature requests you submit from a scan (title, description, impact label, status).</li>
         <li>Optional Slack webhook URL and notification email override you configure in Settings.</li>
+        <li>Your subscription plan and billing status, provided to us by Shopify via the Billing API. We never see or store your payment card details &mdash; all billing is handled directly by Shopify.</li>
       </ul>
 
       <h2>How we use it</h2>
@@ -19,7 +20,8 @@ export default function Privacy() {
         recommendations for your store. Your Anthropic API key is used only to make that
         request on your behalf and is never shared with any other shop. When you request a
         feature, a notification email (and optional Slack message) is sent so the app
-        builder can follow up.
+        builder can follow up. Your subscription plan is used to determine your monthly
+        scan allowance.
       </p>
 
       <h2>Third parties</h2>
@@ -28,8 +30,9 @@ export default function Privacy() {
         <a href="https://www.anthropic.com/legal/privacy" target="_blank" rel="noreferrer">
           Anthropic
         </a>{" "}
-        to generate recommendations, and use an SMTP provider to deliver notification
-        emails. We do not sell or share your data for advertising.
+        to generate recommendations, use an SMTP provider to deliver notification
+        emails, and use Shopify&apos;s Billing API to process subscription charges. We do
+        not sell or share your data for advertising.
       </p>
 
       <h2>Data retention and deletion</h2>
@@ -47,6 +50,11 @@ export default function Privacy() {
           Facebook
         </a>
         .
+      </p>
+
+      <h2>Related</h2>
+      <p>
+        See also our <a href="/terms">Terms of Service</a>.
       </p>
     </div>
   );

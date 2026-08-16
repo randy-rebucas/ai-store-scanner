@@ -5,7 +5,7 @@ import { useAppBridge } from "@shopify/app-bridge-react";
 import { authenticate } from "../shopify.server";
 import { getShopSettings, upsertShopSettings } from "../models/settings.server";
 import { AI_MODELS } from "../models/ai-models";
-import { getActivePlan } from "../models/billing.server";
+import { BILLING_ENFORCED, getActivePlan } from "../models/billing.server";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session, billing } = await authenticate.admin(request);
@@ -14,6 +14,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
   return {
     activePlan,
+    billingEnforced: BILLING_ENFORCED,
     aiModel: settings?.aiModel || "claude-sonnet-5",
     hasApiKey: Boolean(settings?.anthropicApiKey),
     maskedApiKey: settings?.anthropicApiKey
@@ -71,6 +72,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 export default function Settings() {
   const {
     activePlan,
+    billingEnforced,
     aiModel,
     hasApiKey,
     maskedApiKey,
@@ -216,7 +218,10 @@ export default function Settings() {
 
       <s-section slot="aside" heading="Plan">
         <s-paragraph>
-          Current plan: <s-text tone="neutral">{activePlan || "None"}</s-text>
+          Current plan:{" "}
+          <s-text tone="neutral">
+            {activePlan || (billingEnforced ? "None" : "None (billing disabled outside production)")}
+          </s-text>
         </s-paragraph>
         <s-link href="/app/plans">Manage plan</s-link>
       </s-section>
@@ -255,6 +260,10 @@ export default function Settings() {
           . Read our{" "}
           <s-link href="/privacy" target="_blank">
             privacy policy
+          </s-link>{" "}
+          and{" "}
+          <s-link href="/terms" target="_blank">
+            terms of service
           </s-link>
           .
         </s-paragraph>
