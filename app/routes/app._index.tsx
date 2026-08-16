@@ -1,24 +1,17 @@
-import { useEffect } from "react";
+import { useEffect, useRef, useState } from "react";
 import type {
   ActionFunctionArgs,
   HeadersFunction,
   LoaderFunctionArgs,
 } from "react-router";
-import { useFetcher, useLoaderData } from "react-router";
+import { useFetcher, useLoaderData, useRevalidator } from "react-router";
 import { useAppBridge } from "@shopify/app-bridge-react";
 import { authenticate } from "../shopify.server";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { getShopSettings } from "../models/settings.server";
 import {
-  checkScanAllowed,
-  collectStoreData,
-  completeScan,
-  createScan,
-  failScan,
-  generateRecommendations,
   getLatestScan,
   getStoreOwnerEmail,
-  pruneOldScans,
   type Recommendation,
 } from "../models/scan.server";
 import {
@@ -92,27 +85,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     return { ok: true, requested: title };
   }
 
-  const allowed = await checkScanAllowed(session.shop);
-  if (!allowed.allowed) {
-    return { ok: false, error: allowed.reason };
-  }
-
-  const scan = await createScan(session.shop);
-
-  try {
-    const storeData = await collectStoreData(admin);
-    const recommendations = await generateRecommendations(
-      session.shop,
-      storeData,
-    );
-    await completeScan(scan.id, storeData, recommendations);
-    await pruneOldScans(session.shop);
-    return { ok: true, scanId: scan.id };
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "Scan failed";
-    await failScan(scan.id, message);
-    return { ok: false, error: message };
-  }
+  return { ok: false, error: "Unknown action" };
 };
 
 const IMPACT_TONE: Record<string, "success" | "info" | "neutral"> = {
@@ -178,25 +151,75 @@ function FeatureRequestButton({
 
 export default function Index() {
   const { hasApiKey, scan, requestedTitles } = useLoaderData<typeof loader>();
-  const fetcher = useFetcher<typeof action>();
   const shopify = useAppBridge();
+  const revalidator = useRevalidator();
 
-  const isScanning =
-    fetcher.state !== "idle" && fetcher.formMethod === "POST";
+  const [isScanning, setIsScanning] = useState(false);
+  const [scanLogs, setScanLogs] = useState<string[]>([]);
+  const logsEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (fetcher.data && fetcher.state === "idle") {
-      if (fetcher.data.ok) {
+    logsEndRef.current?.scrollIntoView({ block: "nearest" });
+  }, [scanLogs]);
+
+  const runScan = async () => {
+    setScanLogs([]);
+    setIsScanning(true);
+
+    try {
+      const response = await fetch("/app/scan-stream", { method: "POST" });
+      if (!response.body) {
+        throw new Error("Scan stream unavailable");
+      }
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let finalOk = false;
+      let finalError: string | null = null;
+
+      let done = false;
+      while (!done) {
+        const chunk = await reader.read();
+        done = chunk.done;
+        if (done) break;
+        const value = chunk.value;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() ?? "";
+
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          const event = JSON.parse(line) as
+            | { type: "log"; message: string }
+            | { type: "done"; ok: boolean; error?: string };
+
+          if (event.type === "log") {
+            setScanLogs((prev) => [...prev, event.message]);
+          } else if (event.type === "done") {
+            finalOk = event.ok;
+            finalError = event.error ?? null;
+          }
+        }
+      }
+
+      if (finalOk) {
+        setScanLogs((prev) => [...prev, "Scan complete."]);
         shopify.toast.show("Store scan complete");
       } else {
-        shopify.toast.show(fetcher.data.error || "Scan failed", {
-          isError: true,
-        });
+        setScanLogs((prev) => [...prev, `Failed: ${finalError}`]);
+        shopify.toast.show(finalError || "Scan failed", { isError: true });
       }
+      revalidator.revalidate();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Scan failed";
+      setScanLogs((prev) => [...prev, `Failed: ${message}`]);
+      shopify.toast.show(message, { isError: true });
+    } finally {
+      setIsScanning(false);
     }
-  }, [fetcher.data, fetcher.state, shopify]);
-
-  const runScan = () => fetcher.submit({}, { method: "POST" });
+  };
 
   return (
     <s-page heading="AI Store Audit">
@@ -227,6 +250,27 @@ export default function Index() {
           retention, AOV, and implementation complexity.
         </s-paragraph>
       </s-section>
+
+      {(isScanning || scanLogs.length > 0) && (
+        <s-section heading="Scan progress">
+          <s-box
+            padding="base"
+            borderWidth="base"
+            borderRadius="base"
+            background="subdued"
+          >
+            <s-stack direction="block" gap="small-200">
+              {scanLogs.map((line, i) => (
+                <s-text key={i} tone={line.startsWith("Failed") ? "critical" : "neutral"}>
+                  {line}
+                </s-text>
+              ))}
+              {isScanning && <s-spinner />}
+            </s-stack>
+            <div ref={logsEndRef} />
+          </s-box>
+        </s-section>
+      )}
 
       {scan?.storeData && (
         <s-section heading="Store snapshot">

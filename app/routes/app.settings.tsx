@@ -5,12 +5,15 @@ import { useAppBridge } from "@shopify/app-bridge-react";
 import { authenticate } from "../shopify.server";
 import { getShopSettings, upsertShopSettings } from "../models/settings.server";
 import { AI_MODELS } from "../models/ai-models";
+import { getActivePlan } from "../models/billing.server";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  const { session } = await authenticate.admin(request);
+  const { session, billing } = await authenticate.admin(request);
   const settings = await getShopSettings(session.shop);
+  const activePlan = await getActivePlan(billing);
 
   return {
+    activePlan,
     aiModel: settings?.aiModel || "claude-sonnet-5",
     hasApiKey: Boolean(settings?.anthropicApiKey),
     maskedApiKey: settings?.anthropicApiKey
@@ -67,6 +70,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
 export default function Settings() {
   const {
+    activePlan,
     aiModel,
     hasApiKey,
     maskedApiKey,
@@ -208,6 +212,13 @@ export default function Settings() {
             </s-button>
           )}
         </s-stack>
+      </s-section>
+
+      <s-section slot="aside" heading="Plan">
+        <s-paragraph>
+          Current plan: <s-text tone="neutral">{activePlan || "None"}</s-text>
+        </s-paragraph>
+        <s-link href="/app/plans">Manage plan</s-link>
       </s-section>
 
       <s-section slot="aside" heading="About">
