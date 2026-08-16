@@ -8,16 +8,7 @@ import {
 import { PrismaSessionStorage } from "@shopify/shopify-app-session-storage-prisma";
 import prisma from "./db.server";
 import { getAppUrl } from "./utils/app-url";
-
-export const BASIC_PLAN = "Basic" as const;
-export const PRO_PLAN = "Pro" as const;
-export const GROWTH_PLAN = "Growth" as const;
-
-export const PLAN_SCAN_LIMITS: Record<string, number | null> = {
-  [BASIC_PLAN]: 5,
-  [PRO_PLAN]: 20,
-  [GROWTH_PLAN]: null, // unlimited
-};
+import { BASIC_PLAN, GROWTH_PLAN, PRO_PLAN } from "./models/plans";
 
 const shopify = shopifyApp({
   apiKey: process.env.SHOPIFY_API_KEY,

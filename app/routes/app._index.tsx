@@ -10,9 +10,12 @@ import { authenticate } from "../shopify.server";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { getShopSettings } from "../models/settings.server";
 import {
+  computeScanTrends,
   getLatestScan,
+  getPreviousCompletedScan,
   getStoreOwnerEmail,
   type Recommendation,
+  type StoreSnapshot,
 } from "../models/scan.server";
 import {
   createFeatureRequest,
@@ -31,18 +34,28 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     ? await getRequestedTitles(session.shop, latestScan.id)
     : [];
 
+  const currentStoreData: StoreSnapshot | null =
+    latestScan?.storeData ? JSON.parse(latestScan.storeData) : null;
+
+  let trends: ReturnType<typeof computeScanTrends> = [];
+  if (latestScan && latestScan.status === "completed" && currentStoreData) {
+    const previousScan = await getPreviousCompletedScan(session.shop, latestScan.id);
+    const previousStoreData: StoreSnapshot | null =
+      previousScan?.storeData ? JSON.parse(previousScan.storeData) : null;
+    trends = computeScanTrends(currentStoreData, previousStoreData);
+  }
+
   return {
     hasApiKey: Boolean(settings?.anthropicApiKey || process.env.ANTHROPIC_API_KEY),
     requestedTitles,
+    trends,
     scan: latestScan
       ? {
           id: latestScan.id,
           status: latestScan.status,
           errorMessage: latestScan.errorMessage,
           createdAt: latestScan.createdAt,
-          storeData: latestScan.storeData
-            ? JSON.parse(latestScan.storeData)
-            : null,
+          storeData: currentStoreData,
           recommendations: latestScan.recommendations
             ? (JSON.parse(latestScan.recommendations) as Recommendation[])
             : null,
@@ -149,8 +162,60 @@ function FeatureRequestButton({
   );
 }
 
+const AI_SHOPIFY_BUILDER_URL = "https://www.ai-shopify-builder.app";
+
+function BuildPromptPanel({ buildPrompt }: { buildPrompt: string }) {
+  const shopify = useAppBridge();
+  const [expanded, setExpanded] = useState(false);
+
+  if (!buildPrompt) return null;
+
+  const copyPrompt = async () => {
+    try {
+      await navigator.clipboard.writeText(buildPrompt);
+      shopify.toast.show("Build prompt copied");
+    } catch {
+      shopify.toast.show("Couldn't copy prompt", { isError: true });
+    }
+  };
+
+  return (
+    <s-stack direction="block" gap="small-200">
+      <s-stack direction="inline" gap="small">
+        <s-button variant="tertiary" onClick={() => setExpanded((v) => !v)}>
+          {expanded ? "Hide build prompt" : "Show build prompt"}
+        </s-button>
+        <s-button variant="tertiary" onClick={copyPrompt}>
+          Copy prompt
+        </s-button>
+        <s-button
+          variant="tertiary"
+          href={AI_SHOPIFY_BUILDER_URL}
+          target="_blank"
+        >
+          Build it with AI Shopify Builder →
+        </s-button>
+      </s-stack>
+
+      {expanded && (
+        <s-box padding="base" borderWidth="base" borderRadius="base" background="base">
+          <s-paragraph>{buildPrompt}</s-paragraph>
+        </s-box>
+      )}
+
+      <s-text tone="neutral">
+        Paste this prompt into Claude, Cursor, or{" "}
+        <s-link href={AI_SHOPIFY_BUILDER_URL} target="_blank">
+          AI Shopify Builder
+        </s-link>{" "}
+        to build this feature yourself.
+      </s-text>
+    </s-stack>
+  );
+}
+
 export default function Index() {
-  const { hasApiKey, scan, requestedTitles } = useLoaderData<typeof loader>();
+  const { hasApiKey, scan, requestedTitles, trends } = useLoaderData<typeof loader>();
   const shopify = useAppBridge();
   const revalidator = useRevalidator();
 
@@ -272,6 +337,24 @@ export default function Index() {
         </s-section>
       )}
 
+      {trends.length > 0 && (
+        <s-section heading="Since your last scan">
+          <s-stack direction="inline" gap="base">
+            {trends.map((trend) => {
+              const improved = trend.higherIsBetter
+                ? trend.direction === "up"
+                : trend.direction === "down";
+              return (
+                <s-badge key={trend.key} tone={improved ? "success" : "critical"}>
+                  {trend.label}: {trend.delta > 0 ? "+" : ""}
+                  {trend.delta} ({trend.previous} → {trend.current})
+                </s-badge>
+              );
+            })}
+          </s-stack>
+        </s-section>
+      )}
+
       {scan?.storeData && (
         <s-section heading="Store snapshot">
           <s-stack direction="inline" gap="large">
@@ -332,6 +415,7 @@ export default function Index() {
                       alreadyRequested={requestedTitles.includes(rec.title)}
                     />
                   </s-box>
+                  <BuildPromptPanel buildPrompt={rec.buildPrompt} />
                 </s-stack>
               </s-box>
             ))}

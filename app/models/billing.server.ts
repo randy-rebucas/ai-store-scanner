@@ -1,12 +1,7 @@
-import {
-  BASIC_PLAN,
-  GROWTH_PLAN,
-  PLAN_SCAN_LIMITS,
-  PRO_PLAN,
-  authenticate,
-} from "../shopify.server";
+import { authenticate } from "../shopify.server";
+import { ALL_PLANS, PLAN_SCAN_LIMITS } from "./plans";
 
-export const ALL_PLANS = [BASIC_PLAN, PRO_PLAN, GROWTH_PLAN] as const;
+export { ALL_PLANS };
 
 type Billing = Awaited<ReturnType<typeof authenticate.admin>>["billing"];
 

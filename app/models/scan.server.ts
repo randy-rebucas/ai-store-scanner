@@ -8,6 +8,11 @@ export type Recommendation = {
   description: string;
   impact: string;
   impactLabel: string;
+  // A detailed, self-contained prompt the merchant can paste into an AI
+  // coding tool (Claude, Cursor, ai-shopify-builder.app, etc.) to build this
+  // feature. Written by the model itself so it can reference the store's
+  // actual data and the Shopify APIs/extension points involved.
+  buildPrompt: string;
 };
 
 export type StoreSnapshot = {
@@ -302,6 +307,22 @@ customer behavior) — do not make claims about those areas. For each recommenda
 - description: 1-2 sentence explanation tailored to this store's actual data
 - impact: one of "revenue", "retention", "aov", "conversion", "complexity"
 - impactLabel: a short label like "High revenue impact" or "Low implementation complexity"
+- buildPrompt: a detailed, self-contained prompt (200-400 words) the merchant can copy
+  and paste directly into an AI coding assistant (Claude, Cursor, or a Shopify app builder)
+  to actually build this feature. It must:
+  - Restate the feature and the specific business goal it serves for this store,
+    citing the actual numbers from the snapshot that motivate it
+  - Name the concrete Shopify surface needed (theme app extension, checkout UI extension,
+    Admin API mutation/query, Shopify Function, webhook, etc.) — pick the correct one for
+    this feature, don't default to "theme app extension" for everything
+  - List the specific Shopify Admin/Storefront GraphQL objects, fields, or mutations
+    the implementation will likely touch
+  - Describe the expected user-facing behavior in concrete terms (what the merchant or
+    buyer sees and does)
+  - Note any edge cases specific to this store's data worth handling (e.g. "this store
+    has N out-of-stock products, so handle the empty-result case")
+  - Be written as an instruction TO the AI tool ("Build a Shopify theme app extension that..."),
+    not a description of the feature to a human
 
 Respond ONLY with a JSON array of objects matching this shape, no prose, no markdown fences.`;
 
@@ -328,7 +349,7 @@ export async function generateRecommendations(
   try {
     message = await client.messages.create({
       model,
-      max_tokens: 1500,
+      max_tokens: 8000,
       system: RECOMMENDATION_SYSTEM_PROMPT,
       messages: [
         {
@@ -348,9 +369,15 @@ export async function generateRecommendations(
     );
   }
 
+  if (message.stop_reason === "max_tokens") {
+    throw new Error(
+      "Claude's response was cut off before finishing. Please try running the scan again.",
+    );
+  }
+
   let parsed: unknown;
   try {
-    parsed = JSON.parse(textBlock.text);
+    parsed = JSON.parse(extractJsonArrayText(textBlock.text));
   } catch {
     throw new Error(
       "Claude returned a response we couldn't read. Please try running the scan again.",
@@ -371,6 +398,22 @@ export async function generateRecommendations(
   return recommendations;
 }
 
+// Claude sometimes wraps JSON in ```json fences or adds a stray sentence
+// despite instructions not to. Strip fences and slice out the outermost
+// array before parsing, rather than failing on the first parse attempt.
+function extractJsonArrayText(text: string): string {
+  const fenced = text.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
+  const candidate = fenced ? fenced[1] : text;
+
+  const start = candidate.indexOf("[");
+  const end = candidate.lastIndexOf("]");
+  if (start === -1 || end === -1 || end < start) {
+    return candidate.trim();
+  }
+
+  return candidate.slice(start, end + 1);
+}
+
 function isValidRecommendation(value: unknown): value is Recommendation {
   if (!value || typeof value !== "object") {
     return false;
@@ -383,7 +426,9 @@ function isValidRecommendation(value: unknown): value is Recommendation {
     rec.description.length > 0 &&
     typeof rec.impact === "string" &&
     typeof rec.impactLabel === "string" &&
-    rec.impactLabel.length > 0
+    rec.impactLabel.length > 0 &&
+    typeof rec.buildPrompt === "string" &&
+    rec.buildPrompt.length > 0
   );
 }
 
@@ -575,4 +620,93 @@ export async function getLatestScan(shop: string) {
     where: { shop },
     orderBy: { createdAt: "desc" },
   });
+}
+
+// Fetches the completed scan immediately before the given one, for trend comparisons.
+export async function getPreviousCompletedScan(shop: string, beforeScanId: string) {
+  const anchor = await prisma.storeScan.findUnique({
+    where: { id: beforeScanId },
+    select: { createdAt: true },
+  });
+  if (!anchor) return null;
+
+  return prisma.storeScan.findFirst({
+    where: {
+      shop,
+      status: "completed",
+      createdAt: { lt: anchor.createdAt },
+    },
+    orderBy: { createdAt: "desc" },
+  });
+}
+
+export type TrendDirection = "up" | "down" | "flat";
+
+export type TrendMetric = {
+  key: string;
+  label: string;
+  current: number;
+  previous: number;
+  delta: number;
+  direction: TrendDirection;
+  // Whether an increase is good news for the merchant (e.g. more orders) or
+  // bad news (e.g. more out-of-stock products). Used to color the badge.
+  higherIsBetter: boolean;
+};
+
+const TREND_METRICS: Array<{
+  key: string;
+  label: string;
+  higherIsBetter: boolean;
+  get: (data: StoreSnapshot) => number;
+}> = [
+  { key: "productCount", label: "Products", higherIsBetter: true, get: (d) => d.productCount },
+  { key: "orderCount", label: "Orders", higherIsBetter: true, get: (d) => d.orderCount },
+  { key: "customerCount", label: "Customers", higherIsBetter: true, get: (d) => d.customerCount },
+  {
+    key: "outOfStockCount",
+    label: "Out-of-stock products",
+    higherIsBetter: false,
+    get: (d) => d.products.outOfStockCount,
+  },
+  {
+    key: "untaggedCount",
+    label: "Untagged products",
+    higherIsBetter: false,
+    get: (d) => d.products.untaggedCount,
+  },
+  {
+    key: "unfulfilledCount",
+    label: "Unfulfilled orders",
+    higherIsBetter: false,
+    get: (d) => d.orders.unfulfilledCount,
+  },
+  {
+    key: "repeatCustomerCount",
+    label: "Repeat customers (sample)",
+    higherIsBetter: true,
+    get: (d) => d.customers.repeatCustomerCount,
+  },
+];
+
+export function computeScanTrends(
+  current: StoreSnapshot,
+  previous: StoreSnapshot | null,
+): TrendMetric[] {
+  if (!previous) return [];
+
+  return TREND_METRICS.map((metric) => {
+    const currentValue = metric.get(current);
+    const previousValue = metric.get(previous);
+    const delta = currentValue - previousValue;
+    return {
+      key: metric.key,
+      label: metric.label,
+      current: currentValue,
+      previous: previousValue,
+      delta,
+      direction: (delta > 0 ? "up" : delta < 0 ? "down" : "flat") as TrendDirection,
+      higherIsBetter: metric.higherIsBetter,
+    };
+  }).filter((m) => m.direction !== "flat");
 }

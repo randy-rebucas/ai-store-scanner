@@ -1,7 +1,8 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import { useLoaderData } from "react-router";
-import { authenticate, BASIC_PLAN, GROWTH_PLAN, PRO_PLAN } from "../shopify.server";
+import { authenticate } from "../shopify.server";
 import { ALL_PLANS, billingIsTest, getActivePlan } from "../models/billing.server";
+import { BASIC_PLAN, GROWTH_PLAN, PRO_PLAN } from "../models/plans";
 
 const PLAN_DETAILS = [
   {
