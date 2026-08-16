@@ -38,6 +38,9 @@ export type StoreSnapshot = {
     missingSeoTitleCount: number;
     missingSeoDescriptionCount: number;
     sampleSize: number;
+    // Small, capped list of sampled products missing SEO metadata, kept for
+    // the SEO auto-fix flow to target specific products by ID.
+    missingSeoProducts: Array<{ id: string; title: string }>;
   };
   collections: {
     sampleTitles: string[];
@@ -101,6 +104,7 @@ const COUNTS_QUERY = `#graphql
     products(first: 25) {
       edges {
         node {
+          id
           title
           tags
           totalInventory
@@ -207,6 +211,7 @@ export async function collectStoreData(
 
   const productEdges: Array<{
     node: {
+      id: string;
       title: string;
       tags: string[];
       totalInventory: number | null;
@@ -308,6 +313,10 @@ export async function collectStoreData(
         (e) => !e.node.seo?.description?.trim(),
       ).length,
       sampleSize: productEdges.length,
+      missingSeoProducts: productEdges
+        .filter((e) => !e.node.seo?.title?.trim() || !e.node.seo?.description?.trim())
+        .slice(0, 10)
+        .map((e) => ({ id: e.node.id, title: e.node.title })),
     },
     collections: {
       sampleTitles: collectionEdges.map((e) => e.node.title),
@@ -476,7 +485,7 @@ export async function generateRecommendations(
 // Claude sometimes wraps JSON in ```json fences or adds a stray sentence
 // despite instructions not to. Strip fences and slice out the outermost
 // array before parsing, rather than failing on the first parse attempt.
-function extractJsonArrayText(text: string): string {
+export function extractJsonArrayText(text: string): string {
   const fenced = text.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
   const candidate = fenced ? fenced[1] : text;
 

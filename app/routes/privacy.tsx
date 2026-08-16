@@ -13,6 +13,7 @@ export default function Privacy() {
         <li>Optional Slack webhook URL and notification email override you configure in Settings.</li>
         <li>Your subscription plan and billing status, provided to us by Shopify via the Billing API. We never see or store your payment card details &mdash; all billing is handled directly by Shopify.</li>
         <li>Whether you view, copy, or open an AI build prompt from a recommendation (no prompt content is stored, just that the action happened) &mdash; used only in aggregate to understand which parts of the app are useful.</li>
+        <li>Whether your store&apos;s privacy, refund, terms of service, and shipping policy pages are configured (not their content) &mdash; used only to compute your Trust score.</li>
       </ul>
 
       <h2>How we use it</h2>
@@ -24,6 +25,16 @@ export default function Privacy() {
         builder can follow up. Your subscription plan is used to determine your monthly
         scan allowance. If you enable the weekly digest, we run a scan on your behalf on
         a recurring schedule and email you a summary.
+      </p>
+
+      <h2>SEO auto-fix</h2>
+      <p>
+        For products missing an SEO title or description, you can ask the app to draft
+        replacements with AI and review them before anything changes. If you approve a
+        suggestion, we write that SEO title and description to the product via the Shopify
+        Admin API &mdash; nothing is written without your explicit approval. We keep a log
+        (product, old/new values, timestamp) of every fix you apply so you and our support
+        team can see exactly what changed.
       </p>
 
       <h2>Benchmarking</h2>

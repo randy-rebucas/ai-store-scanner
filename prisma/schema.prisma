@@ -99,3 +99,19 @@ model PromptInteraction {
   @@index([shop, createdAt])
   @@index([action])
 }
+
+// Audit trail of SEO auto-fixes applied to a merchant's products, so
+// support/merchants can see exactly what the app changed and when.
+model SeoFixLog {
+  id                      String   @id @default(cuid())
+  shop                    String
+  productId               String
+  productTitle            String
+  previousSeoTitle        String?
+  previousSeoDescription  String?
+  newSeoTitle             String
+  newSeoDescription       String
+  appliedAt               DateTime @default(now())
+
+  @@index([shop, appliedAt])
+}

@@ -35,6 +35,13 @@ import {
   recordPromptInteraction,
   type PromptInteractionAction,
 } from "../models/promptInteraction.server";
+import {
+  applySeoFixes,
+  generateSeoSuggestions,
+  logSeoFixes,
+  type SeoFixInput,
+  type SeoSuggestion,
+} from "../models/seoFix.server";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
@@ -163,6 +170,57 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     }
 
     return { ok: true };
+  }
+
+  if (intent === "preview-seo-fix") {
+    const latestScan = await getLatestScan(session.shop);
+    const storeData: StoreSnapshot | null =
+      latestScan?.storeData ? JSON.parse(latestScan.storeData) : null;
+    const candidates = storeData?.products.missingSeoProducts ?? [];
+
+    if (candidates.length === 0) {
+      return { ok: false, error: "No products need an SEO fix right now." };
+    }
+
+    try {
+      const suggestions = await generateSeoSuggestions(session.shop, candidates);
+      if (suggestions.length === 0) {
+        return { ok: false, error: "Couldn't generate SEO suggestions. Please try again." };
+      }
+      return { ok: true, suggestions };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Couldn't generate SEO suggestions.";
+      return { ok: false, error: message };
+    }
+  }
+
+  if (intent === "apply-seo-fix") {
+    const raw = String(formData.get("fixes") || "[]");
+    let fixes: SeoFixInput[] = [];
+    try {
+      fixes = JSON.parse(raw);
+    } catch {
+      return { ok: false, error: "Invalid fix data." };
+    }
+
+    if (!Array.isArray(fixes) || fixes.length === 0) {
+      return { ok: false, error: "No products selected." };
+    }
+
+    const result = await applySeoFixes(admin, fixes);
+    if (result.succeeded.length > 0) {
+      await logSeoFixes(session.shop, result.succeeded);
+    }
+
+    return {
+      ok: result.succeeded.length > 0,
+      succeededCount: result.succeeded.length,
+      failedCount: result.failed.length,
+      error:
+        result.succeeded.length === 0
+          ? result.failed[0]?.error || "Couldn't apply SEO fixes."
+          : undefined,
+    };
   }
 
   return { ok: false, error: "Unknown action" };
@@ -442,9 +500,157 @@ function OverallScoreRing({ score }: { score: number | null }) {
   );
 }
 
+function AutoFixSeoPanel() {
+  const shopify = useAppBridge();
+  const previewFetcher = useFetcher<{
+    ok: boolean;
+    suggestions?: SeoSuggestion[];
+    error?: string;
+  }>();
+  const applyFetcher = useFetcher<{
+    ok: boolean;
+    succeededCount?: number;
+    failedCount?: number;
+    error?: string;
+  }>();
+
+  const [suggestions, setSuggestions] = useState<SeoSuggestion[] | null>(null);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [applied, setApplied] = useState(false);
+
+  const isPreviewing = previewFetcher.state !== "idle";
+  const isApplying = applyFetcher.state !== "idle";
+
+  useEffect(() => {
+    if (previewFetcher.data && previewFetcher.state === "idle") {
+      if (previewFetcher.data.ok && previewFetcher.data.suggestions) {
+        setSuggestions(previewFetcher.data.suggestions);
+        setSelected(new Set(previewFetcher.data.suggestions.map((s) => s.id)));
+      } else {
+        shopify.toast.show(previewFetcher.data.error || "Couldn't generate SEO fixes", {
+          isError: true,
+        });
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [previewFetcher.data, previewFetcher.state]);
+
+  useEffect(() => {
+    if (applyFetcher.data && applyFetcher.state === "idle") {
+      if (applyFetcher.data.ok) {
+        setApplied(true);
+        shopify.toast.show(
+          `Updated ${applyFetcher.data.succeededCount} product${applyFetcher.data.succeededCount === 1 ? "" : "s"}. Run a new scan to see your updated SEO score.`,
+        );
+      } else {
+        shopify.toast.show(applyFetcher.data.error || "Couldn't apply SEO fixes", {
+          isError: true,
+        });
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [applyFetcher.data, applyFetcher.state]);
+
+  const startPreview = () => {
+    previewFetcher.submit({ intent: "preview-seo-fix" }, { method: "POST" });
+  };
+
+  const toggleSelected = (id: string) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const applyFixes = () => {
+    if (!suggestions) return;
+    const chosen: SeoFixInput[] = suggestions
+      .filter((s) => selected.has(s.id))
+      .map((s) => ({
+        id: s.id,
+        productTitle: s.title,
+        seoTitle: s.suggestedSeoTitle,
+        seoDescription: s.suggestedSeoDescription,
+      }));
+    if (chosen.length === 0) return;
+
+    applyFetcher.submit(
+      { intent: "apply-seo-fix", fixes: JSON.stringify(chosen) },
+      { method: "POST" },
+    );
+  };
+
+  if (applied) {
+    return (
+      <s-text tone="success">
+        SEO fixes applied. Run a new scan to see your updated score.
+      </s-text>
+    );
+  }
+
+  if (!suggestions) {
+    return (
+      <s-button
+        variant="tertiary"
+        onClick={startPreview}
+        {...(isPreviewing ? { loading: true } : {})}
+      >
+        Auto-fix SEO
+      </s-button>
+    );
+  }
+
+  return (
+    <s-stack direction="block" gap="small-200">
+      <s-text>Review the suggested changes, then apply the ones you want:</s-text>
+      {suggestions.map((s) => (
+        <s-box
+          key={s.id}
+          padding="small"
+          borderWidth="base"
+          borderRadius="base"
+          background="base"
+        >
+          <s-stack direction="block" gap="small-200">
+            <div style={{ display: "flex", gap: "8px", alignItems: "flex-start" }}>
+              <input
+                type="checkbox"
+                aria-label={`Apply SEO fix for ${s.title}`}
+                checked={selected.has(s.id)}
+                onChange={() => toggleSelected(s.id)}
+              />
+              <s-stack direction="block" gap="small-200">
+                <s-text>{s.title}</s-text>
+                <s-text tone="neutral">Title: {s.suggestedSeoTitle}</s-text>
+                <s-text tone="neutral">Description: {s.suggestedSeoDescription}</s-text>
+              </s-stack>
+            </div>
+          </s-stack>
+        </s-box>
+      ))}
+      <s-stack direction="inline" gap="small">
+        <s-button
+          variant="primary"
+          onClick={applyFixes}
+          disabled={selected.size === 0}
+          {...(isApplying ? { loading: true } : {})}
+        >
+          Apply {selected.size} fix{selected.size === 1 ? "" : "es"}
+        </s-button>
+        <s-button variant="tertiary" onClick={() => setSuggestions(null)}>
+          Cancel
+        </s-button>
+      </s-stack>
+    </s-stack>
+  );
+}
+
 function AnalysisOverview({
   overallScore,
   categoryScores,
+  hasMissingSeoProducts,
 }: {
   overallScore: number | null;
   categoryScores: Array<{
@@ -454,6 +660,7 @@ function AnalysisOverview({
     summary: string;
     insufficientDataReason?: string;
   }>;
+  hasMissingSeoProducts: boolean;
 }) {
   return (
     <s-section heading="Analysis overview">
@@ -491,6 +698,7 @@ function AnalysisOverview({
                 <s-text tone="neutral">
                   {cat.insufficientDataReason || cat.summary}
                 </s-text>
+                {cat.key === "seo" && hasMissingSeoProducts && <AutoFixSeoPanel />}
               </s-stack>
             </s-box>
           ))}
@@ -634,7 +842,11 @@ export default function Index() {
       )}
 
       {scan?.status === "completed" && categoryScores.length > 0 && (
-        <AnalysisOverview overallScore={overallScore} categoryScores={categoryScores} />
+        <AnalysisOverview
+          overallScore={overallScore}
+          categoryScores={categoryScores}
+          hasMissingSeoProducts={Boolean(scan.storeData?.products.missingSeoProducts?.length)}
+        />
       )}
 
       {trends.length > 0 && (
